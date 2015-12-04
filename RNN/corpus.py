@@ -10,58 +10,68 @@ import os
 #
 # By setting the window size the script also extracts contexts. The window
 # size specifies how many words before and after a word are in a context.
+punktuation = ['"', ',', '!', '?', '.', ':', ';', '(', ')', '-', '+', '$', '#', '\'', '@', '%', '&', '*', '[', ']', '\\', '/', '`', '<', '>', '']
 
-def parseTimon(filename, lines=100000, window=2):
-    sentences = []
-    line_nr = 0
+def NewContextParse(filename, lines=100000, whole_file=False, window=2):
 
-    contexts = {}
+    print "Parsing %s lines." % (lines)
 
-    print "Parsing lines and creating contexts."
-
-    with open(filename) as f:
-        for line in f:
-            if line_nr >= lines:
-                break
-
-            words = nltk.word_tokenize(line.decode('utf-8'))
-            sentences.append(words)
-            line_nr += 1
-
-            history = []
-            counter = 0
-
-            for word in words:
-                if not window:
-                    continue
-
-                if counter < window * 2 + 1:
-                    history.append(word)
-                    counter += 1
-                else:
-                    history = history[1:]
-                    history.append(word)
-
-                if counter <= window:
-                    continue
-                elif counter < window * 2 + 1:
-                    i = counter - (window + 1)
-                else:
-                    i = window
-
-                if history[i] in contexts:
-                    contexts[history[i]].append(tuple(history[:i] + history[i+1:]))
-                else:
-                    contexts[history[i]] = [tuple(history[:i] + history[i+1:])]
+    sentences = get_lines(filename, lines, whole_file)
 
     print "Creating vocabulary and mappings."
 
     word_freq = nltk.FreqDist(itertools.chain(*sentences))
-    vocab = word_freq.most_common()
+    vocab = sub_sample(word_freq, 0.000001)
     index_to_word = [x[0] for x in vocab]
     word_to_index = dict([(w,i) for i,w in enumerate(index_to_word)])
 
-    print "Finished parsing."
+    print "Found %s unique words that survived the sub-sampling." %(len(vocab))
+    print "Creating contexts."
+
+    if window:
+        contexts = get_contexts(sentences, vocab, window)
+    else:
+        contexts = {}
+
+    print "Created %s contexts." %(len(contexts))
+    print "Saving parsed data."
+
+    store(vocab, contexts, len(sentences))
+
+    return word_to_index, contexts, index_to_word
+
+def load(lines):
+    file_prefix = "parsed_files/" + str(lines)
+    file_name = file_prefix + "_vocab.txt"
+    vocab = {}
+
+    print "Reading file: " + file_name
+
+    with open(file_name) as f:
+        for line in f:
+            data = line.split()
+            vocab[data[0]] = data[1]
+
+    index_to_word = [x[0] for x in vocab]
+    word_to_index = dict([(w,i) for i,w in enumerate(index_to_word)])
+
+    file_name = file_prefix + "_contexts.txt"
+    contexts = {}
+
+    print "Parsed %s words." %(len(vocab))
+    print "Reading file: " + file_name
+
+    with open(file_name) as f:
+        for line in f:
+            data = line.split()
+            key = data[0]
+            values = data[1].split(',')
+            if key in contexts:
+                contexts[key].append(tuple(values))
+            else:
+                contexts[key] = [tuple(values)]
+
+    print "Parsed contexts of %s words." %(len(contexts))
 
     return word_to_index, contexts, index_to_word
 
@@ -156,3 +166,87 @@ def parseRNN(directory, nr_of_sentences, vocabulary_size = 8000):
     print "Finished training data."
 
     return X_train, Y_train, vocab
+
+def sub_sample(word_freq, t):
+    vocab = {}
+    for word in word_freq:
+        # Sub sampling infrequent words
+        if word_freq[word] < 10:
+            continue
+        # Sub sampling frequent words
+        P = 1 - np.sqrt((t / word_freq.freq(word)))
+        if np.random.random_sample() > P:
+            vocab[word] = word_freq[word]
+    return vocab
+
+def get_lines(filename, lines, whole_file=False):
+    line_nr = 0
+    sentences = []
+    # Getting the text in the right format.
+    with open(filename) as f:
+        for line in f:
+            if not whole_file and line_nr >= lines:
+                break
+            line_nr += 1
+
+            line = line.lower()
+            words = nltk.word_tokenize(line.decode('utf-8'))
+            sentence = []
+
+            for word in words:
+                word = word.strip('",!?.:;()\'').lstrip("'").rstrip("'")
+                if word.endswith("'s"):
+                    word = word[:-2]
+                if word in punktuation:
+                    continue
+                else:
+                    sentence.append(word)
+
+            sentences.append(sentence)
+    return sentences
+
+def get_contexts(sentences, vocab, window):
+    contexts = {}
+    # Creating contexts
+    for sentence in sentences:
+        history = []
+        counter = 0
+        for word in sentence:
+            # Only add a word to a context if it is in the vocabulary.
+            if word in vocab.keys():
+                if counter < window * 2 + 1:
+                    history.append(word)
+                    counter += 1
+                else:
+                    history = history[1:]
+                    history.append(word)
+
+                if counter <= window:
+                    continue
+                elif counter < window * 2 + 1:
+                    i = counter - (window + 1)
+                else:
+                    i = window
+
+                if history[i] in contexts:
+                    contexts[history[i]].append(tuple(history[:i] + history[i+1:]))
+                else:
+                    contexts[history[i]] = [tuple(history[:i] + history[i+1:])]
+    return contexts
+
+def store(vocab, contexts, lines):
+    file_prefix = "parsed_files/" + str(lines)
+    file_name = file_prefix + "_vocab.txt"
+    with open(file_name, 'w+') as v:
+        for word_freq in vocab:
+            v.write(word_freq.encode('utf-8') + " " + str(vocab[word_freq]) + "\n")
+
+    file_name = file_prefix + "_contexts.txt"
+    with open(file_name, 'w+') as v:
+        for word in contexts:
+            for context in contexts[word]:
+                line = ""
+                for cont_word in context:
+                    line += cont_word + ","
+                line = word + " " + line[:-1] + "\n"
+                v.write(line.encode('utf-8'))

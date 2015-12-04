@@ -94,6 +94,12 @@ class RNN:
         self.V -= learning_rate * dLdV
         self.W -= learning_rate * dLdW
 
+    def sqd_update(self, dLdU, dLdV, dLdW, learning_rate):
+        # Update the parameters
+        self.U -= learning_rate * dLdU
+        self.V -= learning_rate * dLdV
+        self.W -= learning_rate * dLdW
+
     def write_to_file(self, filename, vocab):
         with open(filename, 'w') as fout:
             for i, banana in enumerate(self.U):
@@ -114,7 +120,18 @@ def train_with_sgd(model, X_train, y_train, learning_rate=0.1, nepoch=100, evalu
                 learning_rate = learning_rate * 0.5
                 print "Setting learning rate to %f" % learning_rate
             sys.stdout.flush()
+        # Initialize the gradients
+        dLdU = np.zeros(model.U.shape)
+        dLdV = np.zeros(model.V.shape)
+        dLdW = np.zeros(model.W.shape)
         # Loop through the training samples
         for i in range(len(y_train)):
-            model.sgd_step(X_train[i], y_train[i], learning_rate)
+            # Calculate the gradients
+            dU, dV, dW = model.bptt(X_train[i], y_train[i])
+            dLdU += dU
+            dLdV += dV
+            dLdW += dW
+            # model.sgd_step(X_train[i], y_train[i], learning_rate)
             num_examples_seen += 1
+        # Update the weights with the calcuated gradients
+        model.sgd_update(dLdU, dLdV, dLdW, learning_rate)
