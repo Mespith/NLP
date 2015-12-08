@@ -12,7 +12,11 @@ import os
 # size specifies how many words before and after a word are in a context.
 punktuation = ['"', ',', '!', '?', '.', ':', ';', '(', ')', '-', '+', '$', '#', '\'', '@', '%', '&', '*', '[', ']', '\\', '/', '`', '<', '>', '']
 
-def NewContextParse(filename, lines=100000, whole_file=False, window=2):
+# Filename:     The directory of the file you want to parse.
+# whole_file:   When true, the parsing doesn't stop after the set number of lines but will go through the whole file.
+# lines:        The number of lines you want to parse from the given file.
+# window:       The size of the window to create the contexts.
+def NewContextParse(filename, whole_file=False, lines=100000, window=2):
 
     print "Parsing %s lines." % (lines)
 
@@ -22,14 +26,14 @@ def NewContextParse(filename, lines=100000, whole_file=False, window=2):
 
     word_freq = nltk.FreqDist(itertools.chain(*sentences))
     vocab = sub_sample(word_freq, 0.000001)
-    index_to_word = [x[0] for x in vocab]
+    index_to_word = [x for x in vocab]
     word_to_index = dict([(w,i) for i,w in enumerate(index_to_word)])
 
     print "Found %s unique words that survived the sub-sampling." %(len(vocab))
     print "Creating contexts."
 
     if window:
-        contexts = get_contexts(sentences, vocab, window)
+        contexts = get_contexts(sentences, word_to_index, window)
     else:
         contexts = {}
 
@@ -38,8 +42,9 @@ def NewContextParse(filename, lines=100000, whole_file=False, window=2):
 
     store(vocab, contexts, len(sentences))
 
-    return word_to_index, contexts, index_to_word
+    return word_to_index, contexts, index_to_word, vocab
 
+# lines:    The number of lines define which parsed file you want to load.
 def load(lines):
     file_prefix = "parsed_files/" + str(lines)
     file_name = file_prefix + "_vocab.txt"
@@ -50,9 +55,9 @@ def load(lines):
     with open(file_name) as f:
         for line in f:
             data = line.split()
-            vocab[data[0]] = data[1]
+            vocab[data[0]] = int(data[1])
 
-    index_to_word = [x[0] for x in vocab]
+    index_to_word = vocab.keys()
     word_to_index = dict([(w,i) for i,w in enumerate(index_to_word)])
 
     file_name = file_prefix + "_contexts.txt"
@@ -64,16 +69,16 @@ def load(lines):
     with open(file_name) as f:
         for line in f:
             data = line.split()
-            key = data[0]
+            key = int(data[0])
             values = data[1].split(',')
             if key in contexts:
-                contexts[key].append(tuple(values))
+                contexts[key].append(tuple(map(int, values)))
             else:
-                contexts[key] = [tuple(values)]
+                contexts[key] = [tuple(map(int, values))]
 
     print "Parsed contexts of %s words." %(len(contexts))
 
-    return word_to_index, contexts, index_to_word
+    return word_to_index, contexts, index_to_word, vocab
 
 unknown_token = "UNKNOWN_TOKEN"
 
@@ -205,7 +210,7 @@ def get_lines(filename, lines, whole_file=False):
             sentences.append(sentence)
     return sentences
 
-def get_contexts(sentences, vocab, window):
+def get_contexts(sentences, word_to_index, window):
     contexts = {}
     # Creating contexts
     for sentence in sentences:
@@ -213,13 +218,14 @@ def get_contexts(sentences, vocab, window):
         counter = 0
         for word in sentence:
             # Only add a word to a context if it is in the vocabulary.
-            if word in vocab.keys():
+            if word in word_to_index:
+                word_indx = word_to_index[word]
                 if counter < window * 2 + 1:
-                    history.append(word)
+                    history.append(word_indx)
                     counter += 1
                 else:
                     history = history[1:]
-                    history.append(word)
+                    history.append(word_indx)
 
                 if counter <= window:
                     continue
@@ -247,6 +253,5 @@ def store(vocab, contexts, lines):
             for context in contexts[word]:
                 line = ""
                 for cont_word in context:
-                    line += cont_word + ","
-                line = word + " " + line[:-1] + "\n"
-                v.write(line.encode('utf-8'))
+                    line += str(cont_word) + ","
+                v.write(str(word) + " " + line[:-1] + "\n")
